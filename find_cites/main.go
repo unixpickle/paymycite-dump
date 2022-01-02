@@ -1,16 +1,19 @@
 package main
 
 import (
+	"encoding/csv"
 	"flag"
-	"fmt"
 	"html"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/unixpickle/essentials"
 )
 
 func main() {
@@ -19,11 +22,13 @@ func main() {
 	var startCiteNum int
 	var endCiteNum int
 	var concurrency int
+	var output string
 	flag.IntVar(&startAgency, "start-agency", 0, "agency ID")
 	flag.IntVar(&endAgency, "end-agency", 200, "agency ID")
 	flag.IntVar(&startCiteNum, "start-cite-num", 100000, "range start citation number")
 	flag.IntVar(&endCiteNum, "end-cite-num", 999999, "range end citation number")
 	flag.IntVar(&concurrency, "concurrency", 16, "number of parallel requests")
+	flag.StringVar(&output, "output", "output.csv", "output CSV file")
 	flag.Parse()
 
 	queries := make(chan *Query, 100)
@@ -46,10 +51,26 @@ func main() {
 	var numResults int
 	var numFound int
 
+	w, err := os.Create(output)
+	essentials.Must(err)
+	csvWriter := csv.NewWriter(w)
+	defer w.Close()
+
 	for result := range results {
 		if result.Found {
 			numFound++
-			fmt.Println(result)
+			essentials.Must(csvWriter.Write([]string{
+				strconv.Itoa(result.Agency),
+				result.CiteNum,
+				result.AgencyName,
+				result.Plate,
+				result.State,
+				result.Date,
+				result.Total,
+				result.Notes,
+			}))
+			csvWriter.Flush()
+			essentials.Must(csvWriter.Error())
 		}
 		numResults++
 		if numResults%100 == 0 {
@@ -66,13 +87,13 @@ type Query struct {
 
 type Response struct {
 	Query
-	Found  bool
-	Agency string
-	Plate  string
-	State  string
-	Date   string
-	Total  string
-	Notes  string
+	Found      bool
+	AgencyName string
+	Plate      string
+	State      string
+	Date       string
+	Total      string
+	Notes      string
 }
 
 func requestWorker(queries <-chan *Query, responses chan<- *Response) {
@@ -101,7 +122,7 @@ func requestWorker(queries <-chan *Query, responses chan<- *Response) {
 		}
 		response := &Response{Query: *query, Found: true}
 		entries := map[string]*string{
-			"DataGrid1_ctl02_LabelAgency":  &response.Agency,
+			"DataGrid1_ctl02_LabelAgency":  &response.AgencyName,
 			"DataGrid1_ctl02_LabelPlate":   &response.Plate,
 			"DataGrid1_ctl02_LabelState":   &response.State,
 			"DataGrid1_ctl02_LabelMessage": &response.Notes,
