@@ -12,9 +12,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/unixpickle/essentials"
 )
+
+var AbsentAgencies sync.Map
 
 func main() {
 	var startAgency int
@@ -24,7 +27,7 @@ func main() {
 	var concurrency int
 	var output string
 	flag.IntVar(&startAgency, "start-agency", 0, "agency ID")
-	flag.IntVar(&endAgency, "end-agency", 200, "agency ID")
+	flag.IntVar(&endAgency, "end-agency", 500, "agency ID")
 	flag.IntVar(&startCiteNum, "start-cite-num", 100000, "range start citation number")
 	flag.IntVar(&endCiteNum, "end-cite-num", 999999, "range end citation number")
 	flag.IntVar(&concurrency, "concurrency", 16, "number of parallel requests")
@@ -51,7 +54,7 @@ func main() {
 	var numResults int
 	var numFound int
 
-	w, err := os.Create(output)
+	w, err := os.OpenFile(output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	essentials.Must(err)
 	csvWriter := csv.NewWriter(w)
 	defer w.Close()
@@ -74,10 +77,10 @@ func main() {
 		}
 		numResults++
 		if numResults%100 == 0 {
-			log.Printf("found %d/%d queries", numFound, numResults)
+			log.Printf("found %d/%d queries (%d absent agencies)",
+				numFound, numResults, numAbsentAgencies())
 		}
 	}
-
 }
 
 type Query struct {
@@ -98,6 +101,10 @@ type Response struct {
 
 func requestWorker(queries <-chan *Query, responses chan<- *Response) {
 	for query := range queries {
+		if _, ok := AbsentAgencies.Load(query.Agency); ok {
+			responses <- &Response{Query: *query, Found: false}
+			continue
+		}
 		q := url.Values{}
 		q.Add("agency", strconv.Itoa(query.Agency))
 		q.Add("plate", "")
@@ -115,8 +122,12 @@ func requestWorker(queries <-chan *Query, responses chan<- *Response) {
 			log.Println("ERROR:", err)
 			continue
 		}
-		if strings.Contains(string(content), "Sorry, no citations matched your search.") ||
-			strings.Contains(string(content), "Agency not found.") {
+		noAgency := strings.Contains(string(content), "Agency not found.")
+		noResults := strings.Contains(string(content), "Sorry, no citations matched your search.")
+		if noAgency || noResults {
+			if noAgency {
+				AbsentAgencies.Store(query.Agency, struct{}{})
+			}
 			responses <- &Response{Query: *query, Found: false}
 			continue
 		}
@@ -171,4 +182,13 @@ func parseDateAndPrice(content string) (string, string) {
 		values[i] = html.UnescapeString(content[:endEnd])
 	}
 	return values[0], values[1]
+}
+
+func numAbsentAgencies() int {
+	var count int
+	AbsentAgencies.Range(func(k, v interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }
