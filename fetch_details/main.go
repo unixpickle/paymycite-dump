@@ -5,6 +5,7 @@ import (
 	"flag"
 	"html"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -76,10 +77,13 @@ func writeRecords(path string, records <-chan *CitationInfo) {
 	w.Write(CSVFieldNames)
 	w.Flush()
 	essentials.Must(w.Error())
+	count := 0
 	for rec := range records {
 		w.Write(rec.Fields())
 		w.Flush()
 		essentials.Must(w.Error())
+		count++
+		log.Printf("done %d records", count)
 	}
 }
 
