@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/unixpickle/essentials"
 )
@@ -143,6 +144,14 @@ func requestWorker(queries <-chan *Query, responses chan<- *Response) {
 			*field = parseTableEntry(contentStr, labelID)
 		}
 		response.Date, response.Total = parseDateAndPrice(contentStr)
+		if response.Date == "" {
+			// There appears to be some down time every night
+			// during which records are empty. Try to do as
+			// little searching as possible at this time.
+			log.Println("ERROR: date is empty, sleeping...")
+			time.Sleep(time.Second * 10)
+			continue
+		}
 		responses <- response
 	}
 }
